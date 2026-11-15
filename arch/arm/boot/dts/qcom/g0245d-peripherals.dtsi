@@ -237,3 +237,195 @@
 		};
 	};
 };
+
+/* G0245D uses a TFA9890 I2C smart amp (i2c_6, see above), NOT WSA881x. The
+ * inherited MTP sound node sets qcom,wsa-max-devs = <2> and references the
+ * WSA881x codec devices, which are absent on this board; their probe fails
+ * with -22 and blocks ASoC card registration ("No soundcards found").
+ * Disable WSA to match the known-good CM13 (3.18) audio config so the
+ * Tasha/WCD9335 card registers and routes to the TFA9890 via "hifi amp". */
+&soc {
+	sound-9335 {
+		qcom,wsa-max-devs = <0>;
+		/* CM13 (3.18) G0245D has no TDM BE dai_links: msm8996-mtp.dtsi
+		 * there does not set qcom,tdm-audio-intf.  The 4.4 CAF dtsi
+		 * sets it, pulling in msm8996_tdm_be_dai_links whose 32 TDM
+		 * cpu_dai_names ("msm-dai-q6-tdm.36xxx") can never bind on
+		 * this board and would block the whole Tasha card, so drop
+		 * the property to restore the CM13 link set.
+		 * Also drop qcom,hdmi-audio-rx.  CM13 kept it, but there the
+		 * ext-disp audio codec registered; in 4.4 that path needs
+		 * FB_MSM_MDSS_HDMI_PANEL + MSM_EXT_DISPLAY + the ext-disp
+		 * codec, and enabling the 4.4 HDMI TX panel driver
+		 * boot-loops this board (panic at USB/MTP enumeration,
+		 * verified on device).  The HDMI BE link is unused for this
+		 * board's speaker/headset playback, so remove it instead. */
+		/delete-property/ qcom,tdm-audio-intf;
+		/delete-property/ qcom,hdmi-audio-rx;
+	};
+};
+
+/* G0245D audio: the TFA9890 hangs off quaternary MI2S, driven with an
+ * external 12.288 MHz MCLK and all four data lines (3 RX, 1 TX), and the
+ * qua_mi2s pins must be muxed for playback to reach the amp.  The 4.4 CAF
+ * dtsi quat node has upstream's bare-bones values (rx-lines=1, tx-lines=0,
+ * no MCLK/pinctrl), which the ADSP rejects at AFE port start
+ * ("afe_send_cmd_port_start: AFE enable for port 0x4000 failed").
+ * Restore the property set and pin configuration of the known-good CM13
+ * (3.18) G0245D DTB.  The 4.4 pinctrl dtsi already carries the sclk/ws
+ * (gpio58/59), sd0 (gpio60) and sd1 (gpio61) groups; add the missing
+ * mclk (gpio57), sd2 (gpio62) and sd3 (gpio52) groups below and wire all
+ * of them to the DAI node.
+ */
+&tlmm {
+	quat_mi2s_mclk {
+		quat_mi2s_mclk_sleep: quat_mi2s_mclk_sleep {
+			mux {
+				pins = "gpio57";
+				function = "qua_mi2s";
+			};
+			config {
+				pins = "gpio57";
+				drive-strength = <2>;
+				bias-pull-down;
+			};
+		};
+		quat_mi2s_mclk_active: quat_mi2s_mclk_active {
+			mux {
+				pins = "gpio57";
+				function = "qua_mi2s";
+			};
+			config {
+				pins = "gpio57";
+				drive-strength = <8>;
+				bias-disable;
+				output-high;
+			};
+		};
+	};
+
+	quat_mi2s_sd2 {
+		quat_mi2s_sd2_sleep: quat_mi2s_sd2_sleep {
+			mux {
+				pins = "gpio62";
+				function = "qua_mi2s";
+			};
+			config {
+				pins = "gpio62";
+				drive-strength = <2>;
+				bias-pull-down;
+			};
+		};
+		quat_mi2s_sd2_active: quat_mi2s_sd2_active {
+			mux {
+				pins = "gpio62";
+				function = "qua_mi2s";
+			};
+			config {
+				pins = "gpio62";
+				drive-strength = <8>;
+				bias-disable;
+				output-high;
+			};
+		};
+	};
+
+	quat_mi2s_sd3 {
+		quat_mi2s_sd3_sleep: quat_mi2s_sd3_sleep {
+			mux {
+				pins = "gpio52";
+				function = "qua_mi2s";
+			};
+			config {
+				pins = "gpio52";
+				drive-strength = <2>;
+				bias-pull-down;
+			};
+		};
+		quat_mi2s_sd3_active: quat_mi2s_sd3_active {
+			mux {
+				pins = "gpio52";
+				function = "qua_mi2s";
+			};
+			config {
+				pins = "gpio52";
+				drive-strength = <8>;
+				bias-disable;
+				output-high;
+			};
+		};
+	};
+};
+
+&dai_mi2s_quat {
+	qcom,msm-mi2s-rx-lines = <7>;
+	qcom,msm-mi2s-tx-lines = <8>;
+	qcom,msm-mi2s-slave = <0>;
+	qcom,msm-mi2s-ext-mclk = <0xbb8000>;
+	pinctrl-names = "default", "idle";
+	pinctrl-0 = <&quat_mi2s_active>, <&quat_mi2s_mclk_active>,
+			<&quat_mi2s_sd0_active>, <&quat_mi2s_sd1_active>,
+			<&quat_mi2s_sd2_active>, <&quat_mi2s_sd3_active>;
+	pinctrl-1 = <&quat_mi2s_sleep>, <&quat_mi2s_mclk_sleep>,
+			<&quat_mi2s_sd0_sleep>, <&quat_mi2s_sd1_sleep>,
+			<&quat_mi2s_sd2_sleep>, <&quat_mi2s_sd3_sleep>;
+};
+
+/* G0245D audio: the 4.4 CAF dtsi dropped the legacy primary MI2S DAI node
+ * (it only kept sec/tert/quat and added the group-mi2s form), so the
+ * machine driver's PRI_MI2S dai_links bind against "msm-dai-q6-mi2s.0",
+ * a DAI that never registers: "ASoC: CPU DAI msm-dai-q6-mi2s.0 not
+ * registered" blocks the whole Tasha sound card.  Restore the primary
+ * MI2S node with exactly the property set of the known-good CM13 (3.18)
+ * G0245D DTB. */
+&soc {
+	dai_mi2s_prim: qcom,msm-dai-q6-mi2s-prim {
+		compatible = "qcom,msm-dai-q6-mi2s";
+		qcom,msm-dai-q6-mi2s-dev-id = <0>;
+		qcom,msm-mi2s-rx-lines = <1>;
+		qcom,msm-mi2s-tx-lines = <2>;
+		qcom,msm-mi2s-slave = <0>;
+		qcom,msm-mi2s-ext-mclk = <0>;
+	};
+};
+
+/* G0245D audio: 4.4 soc-core names these legacy MI2S DAIs after the DT
+ * device node ("soc:qcom,msm-dai-q6-mi2s-prim") instead of the 3.18-style
+ * "msm-dai-q6-mi2s.N", so string matching in soc_bind_dai_link can never
+ * succeed.  The upstream workaround is DT-side: listing the cpu dai in
+ * asoc-cpu/asoc-cpu-names makes the machine driver populate cpu_of_node
+ * and drop cpu_dai_name, so the bind runs on of_node only.  The baseline
+ * list has 28 entries and lacks the primary (id 0), secondary (id 1) and
+ * quaternary (id 3, TFA9890) MI2S dais; re-declare the full list plus
+ * those three entries. */
+&soc {
+	sound-9335 {
+		asoc-cpu = <&dai_pri_auxpcm>, <&dai_sec_auxpcm>, <&dai_hdmi>, <&dai_mi2s>,
+				<&dai_mi2s_sec>,
+				<&sb_0_rx>, <&sb_0_tx>, <&sb_1_rx>, <&sb_1_tx>,
+				<&sb_2_rx>, <&sb_2_tx>, <&sb_3_rx>, <&sb_3_tx>,
+				<&sb_4_rx>, <&sb_4_tx>, <&sb_5_tx>, <&afe_pcm_rx>,
+				<&afe_pcm_tx>, <&afe_proxy_rx>, <&afe_proxy_tx>,
+				<&incall_record_rx>, <&incall_record_tx>,
+				<&incall_music_rx>, <&incall_music2_rx>,
+				<&sb_5_rx>, <&sb_6_rx>,
+				<&usb_audio_rx>, <&usb_audio_tx>,
+				<&dai_mi2s_prim>, <&dai_mi2s_quat>;
+		asoc-cpu-names = "msm-dai-q6-auxpcm.1", "msm-dai-q6-auxpcm.2",
+				"msm-dai-q6-hdmi.8", "msm-dai-q6-mi2s.2",
+				"msm-dai-q6-mi2s.1",
+				"msm-dai-q6-dev.16384", "msm-dai-q6-dev.16385",
+				"msm-dai-q6-dev.16386", "msm-dai-q6-dev.16387",
+				"msm-dai-q6-dev.16388", "msm-dai-q6-dev.16389",
+				"msm-dai-q6-dev.16390", "msm-dai-q6-dev.16391",
+				"msm-dai-q6-dev.16392", "msm-dai-q6-dev.16393",
+				"msm-dai-q6-dev.16395", "msm-dai-q6-dev.224",
+				"msm-dai-q6-dev.225", "msm-dai-q6-dev.241",
+				"msm-dai-q6-dev.240", "msm-dai-q6-dev.32771",
+				"msm-dai-q6-dev.32772", "msm-dai-q6-dev.32773",
+				"msm-dai-q6-dev.32770", "msm-dai-q6-dev.16394",
+				"msm-dai-q6-dev.16396",
+				"msm-dai-q6-dev.28672", "msm-dai-q6-dev.28673",
+				"msm-dai-q6-mi2s.0", "msm-dai-q6-mi2s.3";
+	};
+};

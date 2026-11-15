@@ -7124,8 +7124,13 @@ static int msm_audrx_init(struct snd_soc_pcm_runtime *rtd)
 	/*
 	 * Send speaker configuration only for WSA8810.
 	 * Defalut configuration is for WSA8815.
+	 * G0245D: no WSA881x (qcom,wsa-max-devs = <0>).  With zero aux
+	 * devices the card never sets up an aux runtime and card->rtd_aux
+	 * points past the DAI link runtimes, so dereferencing it here
+	 * crashes the kernel while the card instantiates.  Only touch
+	 * rtd_aux when the card actually registered aux devices.
 	 */
-	if (rtd_aux && rtd_aux->component)
+	if (rtd->card->num_aux_devs && rtd_aux && rtd_aux->component)
 		if (!strcmp(rtd_aux->component->name, WSA8810_NAME_1) ||
 		    !strcmp(rtd_aux->component->name, WSA8810_NAME_2)) {
 			tasha_set_spkr_mode(rtd->codec, SPKR_MODE_1);
@@ -9963,6 +9968,20 @@ static struct snd_soc_card *populate_snd_card_dailinks(struct device *dev)
 				msm8996_quat_mi2s_tfa98xx_dai_links[0].codec_name = "tfa98xx.3-0034";
 				msm8996_quat_mi2s_tfa98xx_dai_links[0].codec_dai_name = "tfa98xx-aif-3-34";
 			}
+#ifdef CONFIG_MACH_GREE_G0245D
+			/* G0245D: the TFA9890 amp sits on i2c_6 (see
+			 * g0245d-peripherals.dtsi), so the codec component
+			 * registers as "tfa98xx.6-0034" and the 4.4 driver
+			 * names its DAI "tfa98xx-aif-<bus>-<addr>" i.e.
+			 * "tfa98xx-aif-6-34".  The static 9-0034 defaults (and
+			 * the devid==8 3-0034 rename) never bind and block the
+			 * whole Tasha sound card: mirror the known-good CM13
+			 * (3.18) G0245D tree, which hardcodes the actual i2c
+			 * location for this board. */
+			msm8996_quat_mi2s_tfa98xx_dai_links[0].codec_name = "tfa98xx.6-0034";
+			msm8996_quat_mi2s_tfa98xx_dai_links[0].codec_dai_name =
+					"tfa98xx-aif-6-34";
+#endif
 			memcpy(msm8996_tasha_dai_links + len_4,
 				msm8996_quat_mi2s_tfa98xx_dai_links,
 				sizeof(msm8996_quat_mi2s_tfa98xx_dai_links));

@@ -985,8 +985,50 @@ static int soc_bind_dai_link(struct snd_soc_card *card, int num)
 		rtd->platform = platform;
 	}
 	if (!rtd->platform) {
+		/* G0245D audio diag: identify the exact dai_link whose platform
+		 * component failed to bind (platform_name is NULL after DT
+		 * population, so print platform_of_node's full path instead). */
+		dev_err(card->dev,
+			"G0245D-DIAG link=%s stream=%s plat_name=%s plat_of=%s cpu=%s codec=%s\n",
+			dai_link->name ? dai_link->name : "(null)",
+			dai_link->stream_name ? dai_link->stream_name : "(null)",
+			dai_link->platform_name ? dai_link->platform_name : "(null)",
+			dai_link->platform_of_node ?
+				dai_link->platform_of_node->full_name : "(null)",
+			dai_link->cpu_dai_name ? dai_link->cpu_dai_name : "(null)",
+			dai_link->codec_name ? dai_link->codec_name : "(null)");
 		dev_err(card->dev, "ASoC: platform %s not registered\n",
 			dai_link->platform_name);
+#ifdef CONFIG_MACH_GREE_G0245D
+		/* G0245D: a qdsp6v2 FE platform that never probes (seen with
+		 * msm-pcm-voice: its component never registers on this board)
+		 * must not block the whole Tasha sound card.  Fall back to the
+		 * always-registered snd-soc-dummy platform, mirroring the
+		 * effective CM13 (3.18) known-good behaviour where these FE
+		 * paths simply do not exist.  Playback via TFA9890 does not
+		 * depend on them. */
+		{
+			struct snd_soc_platform *dum;
+
+			list_for_each_entry(dum, &platform_list, list) {
+				if (!strcmp(dum->component.name,
+					    "snd-soc-dummy")) {
+					rtd->platform = dum;
+					break;
+				}
+			}
+		}
+		if (rtd->platform) {
+			dev_warn(card->dev,
+				 "G0245D: link %s platform %s unbound, using snd-soc-dummy\n",
+				 dai_link->name ? dai_link->name : "(null)",
+				 dai_link->platform_of_node ?
+				 dai_link->platform_of_node->full_name :
+				 "(null)");
+			card->num_rtd++;
+			return 0;
+		}
+#endif
 		return -EPROBE_DEFER;
 	}
 

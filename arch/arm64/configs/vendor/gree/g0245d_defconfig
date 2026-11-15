@@ -482,6 +482,12 @@ CONFIG_FB=y
 CONFIG_FB_MSM=y
 CONFIG_FB_MSM_MDSS=y
 CONFIG_FB_MSM_MDSS_WRITEBACK=y
+# G0245D audio note: FB_MSM_MDSS_HDMI_PANEL + SND_SOC_MSM_HDMI_CODEC_RX were
+# tried here to make the inherited HDMI BE dai_link bind, but the 4.4 HDMI TX
+# panel driver boot-loops this board (panic at USB/MTP enumeration, verified
+# on device).  Instead the hdmi-audio-rx property is deleted from the sound
+# node (g0245d-peripherals.dtsi), matching the CM13 G0245D link set minus the
+# unused HDMI BE.
 CONFIG_SOUND=y
 CONFIG_SND=y
 # CONFIG_SND_SUPPORT_OLD_API is not set

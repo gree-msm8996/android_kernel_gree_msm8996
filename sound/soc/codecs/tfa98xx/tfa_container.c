@@ -91,11 +91,29 @@ void tfaContShowHeader(TfaHeader_t *hdr) {
 }
 
 /*
+ * The TFA9890 speaker of this board ships an older container (PM1_00
+ * generation) that predates the nliveData field: its descriptor index
+ * begins where the 4.x header layout expects nliveData.  Detect that
+ * legacy layout by checking whether the first entry at the old location
+ * is a device descriptor while the new location is not, and hand back
+ * the correct index base either way.
+ */
+static TfaDescPtr_t *tfa98xx_cont_index(const TfaContainer_t *cont)
+{
+	const TfaDescPtr_t *legacy = (const TfaDescPtr_t *)&cont->nliveData;
+
+	if (cont->index[0].type != dscDevice && legacy[0].type == dscDevice)
+		return (TfaDescPtr_t *)legacy;
+	return cont->index;
+}
+
+/*
  * return device list dsc from index
  */
 TfaDeviceList_t *tfaContGetDevList(TfaContainer_t *cont, int dev_idx)
 {
 	uint8_t *base = (uint8_t *)cont;
+	TfaDescPtr_t *index;
 
 	if (cont == NULL)
 		return NULL;
@@ -103,10 +121,11 @@ TfaDeviceList_t *tfaContGetDevList(TfaContainer_t *cont, int dev_idx)
 	if ((dev_idx < 0) || (dev_idx >= cont->ndev))
 		return NULL;
 
-	if (cont->index[dev_idx].type != dscDevice)
+	index = tfa98xx_cont_index(cont);
+	if (index[dev_idx].type != dscDevice)
 		return NULL;
 
-	base += cont->index[dev_idx].offset;
+	base += index[dev_idx].offset;
 	return (TfaDeviceList_t *)base;
 }
 
@@ -923,6 +942,11 @@ int tfa_cont_get_idx(struct tfa_device *tfa)
 
 	for (i = 0; i < tfa->cnt->ndev; i++) {
 		dev = tfaContDevice(tfa->cnt, i);
+		/* legacy containers can carry device descriptors whose
+		 * payload does not decode to a valid device list; skip
+		 * them instead of dereferencing a NULL entry */
+		if (dev == NULL)
+			continue;
 		if (dev->dev == tfa->slave_address)
 			break;
 
