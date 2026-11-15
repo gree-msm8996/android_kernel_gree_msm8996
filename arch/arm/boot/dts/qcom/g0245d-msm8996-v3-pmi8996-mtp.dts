@@ -1,0 +1,46 @@
+/*
+ * Gree G0245D: MSM8996 v3 + PMI8996 MTP, single-DSI FT8716 1080p video panel.
+ *
+ * Board-level ids (msm-id <246 0x30001>, board-id <8 0>,
+ * pmic-id <0x20009 0x10013 0 0>) come from the donor dtsi files and match
+ * the G0245D bootloader's selection table. The FT8716 panel node lives in
+ * dsi-panel-ft8716-1080p-video.dtsi, under &mdss_mdp, which is where the 4.4
+ * mdss_dsi_find_panel_of_node() looks it up by node name.
+ */
+
+/dts-v1/;
+
+#include "msm8996-v3.dtsi"
+#include "msm-pmi8996.dtsi"
+#include "msm8996-mtp.dtsi"
+#include "dsi-panel-ft8716-1080p-video.dtsi"
+
+/ {
+	model = "Gree G0245D MSM8996 v3 + PMI8996 (FT8716 FHD)";
+	compatible = "qcom,msm8996-mtp", "qcom,msm8996", "qcom,mtp";
+	qcom,board-id = <8 0>;
+};
+
+/* Single DSI: LK appends "qcom,mdss_dsi_ft8716_1080p_video ... cfg:single_dsi".
+ * Point both controllers at the new panel so dsi_pref_prim_panel() resolves it
+ * no matter which ctrl the bootloader picks. */
+&mdss_dsi0 {
+	qcom,dsi-pref-prim-pan = <&dsi_ft8716_1080p_video>;
+};
+
+&mdss_dsi1 {
+	qcom,dsi-pref-prim-pan = <&dsi_ft8716_1080p_video>;
+};
+
+/* The donor msm8996.dtsi publishes an AVB "android,fstab" with a vendor
+ * partition. This GPT is non-Treble and has none of those partitions.
+ * First-stage init prefers the DT fstab over the ramdisk one and would wait
+ * for a vbmeta/dtbo/vendor chain that does not exist. Disabling it makes
+ * ReadFstabFromDt() fail so /fstab.qcom from the ramdisk is used instead. */
+&firmware {
+	android {
+		fstab {
+			status = "disabled";
+		};
+	};
+};

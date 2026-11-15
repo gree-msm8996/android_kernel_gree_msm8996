@@ -1,0 +1,21 @@
+# Gree configuration options
+#
+# Board selection follows the same machine-symbol pattern as
+# drivers/platform/xiaomi/Kconfig: a vendor symbol selects the SoC family,
+# and each board symbol selects the vendor symbol. The DTS Makefile keys its
+# dtb-y list off these symbols, so upstream platform files stay untouched.
+
+config MACH_GREE
+	bool "Gree device"
+	depends on ARCH_QCOM
+	help
+	  Support for Gree products
+
+config MACH_GREE_G0245D
+	bool "G0245D board"
+	depends on ARCH_MSM8996
+	select MACH_GREE
+	help
+	  Support for the Gree G0245D: MSM8996 v3 + PMI8996 MTP with a
+	  single-DSI FT8716 1080p video panel. Selects the G0245D DTB and
+	  leaves every other board DTB out of the build.
