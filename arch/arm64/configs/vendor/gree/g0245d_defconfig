@@ -696,3 +696,17 @@ CONFIG_CRYPTO_AES_ARM64_CE_BLK=y
 CONFIG_CRYPTO_AES_ARM64_NEON_BLK=y
 CONFIG_CRYPTO_CRC32_ARM64=y
 CONFIG_QMI_ENCDEC=y
+
+# Gree G0245D private peripherals (ported from the 3.18 reconstruction)
+CONFIG_ANDROID_TIMED_OUTPUT=y
+CONFIG_G0245D_TOUCHSCREEN_FT8716=y
+CONFIG_G0245D_FINGERPRINT_GF816M=y
+CONFIG_G0245D_TUSB320=y
+CONFIG_G0245D_RAON_REMOTE_CTRL=y
+CONFIG_G0245D_LDO_MOTOR=y
+CONFIG_G0245D_ZIGBEE=y
+# CONFIG_G0245D_TFA98XX is not set
+# The baseline SND_SOC_TFA98XX driver is force-selected by
+# sound/soc/msm/Kconfig:189 and provides the same OnePlus-CAF TFA98xx
+# implementation. Building the 3.18 reconstruction as well would duplicate
+# 27 global symbols. The 3.18 sources are kept in the tree for reference.

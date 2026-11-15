@@ -19,3 +19,72 @@ config MACH_GREE_G0245D
 	  Support for the Gree G0245D: MSM8996 v3 + PMI8996 MTP with a
 	  single-DSI FT8716 1080p video panel. Selects the G0245D DTB and
 	  leaves every other board DTB out of the build.
+
+
+# ---------------------------------------------------------------------------
+# G0245D private peripherals
+#
+# Namespaced symbols avoid any collision with the xiaomi msm8996 baseline.
+# The drivers themselves live in drivers/platform/gree/peripherals/ and were
+# ported from the G0245D 3.18 reconstruction described in
+# Documentation/g0245d/peripherals.md (3.18 source tree).
+# ---------------------------------------------------------------------------
+
+config G0245D_TOUCHSCREEN_FT8716
+	bool "FocalTech FT8716 touchscreen (Gree G0245D)"
+	depends on I2C && GPIOLIB && INPUT
+	default n
+	help
+	  FocalTech FT8716 touch controller on i2c-12 address 0x38.
+	  Matches DT compatible "focaltech,fts". Pointer reporting only.
+
+config G0245D_FINGERPRINT_GF816M
+	bool "Goodix GF816M fingerprint sensor (Gree G0245D)"
+	depends on SPI_MASTER && GPIOLIB && INPUT && OF
+	default n
+	help
+	  Goodix GF816M on the G0245D SPI bus. Registers /dev/goodix_fp
+	  (major 154) with the vendor gf ioctl ABI.
+
+config G0245D_TUSB320
+	bool "TI TUSB320 Type-C controller (Gree G0245D)"
+	depends on I2C && GPIOLIB
+	default n
+	help
+	  TI TUSB320 on i2c-7 address 0x67. Matches DT compatible
+	  "my,tusb320" used by the G0245D stock DTB. The baseline
+	  CONFIG_TYPEC_TI_TUSB320 driver matches "ti,tusb320" and is left
+	  untouched; both can coexist.
+
+config G0245D_RAON_REMOTE_CTRL
+	bool "RAON remote / IR controller (Gree G0245D)"
+	depends on I2C && GPIOLIB && OF
+	default n
+	help
+	  RAON I2C remote controller at 0x50 on i2c-8. Registers the
+	  /dev/remote_ctrl_dev pass-through character device.
+
+config G0245D_LDO_MOTOR
+	bool "LDO motor vibrator (Gree G0245D)"
+	depends on GPIOLIB && ANDROID_TIMED_OUTPUT && SWITCH
+	default n
+	help
+	  G0245D LDO vibrator, hard-wired to GPIO 85 by the vendor driver.
+	  Provides the Android timed_output vibrator class device.
+
+config G0245D_ZIGBEE
+	bool "TI CC2630 Zigbee radio (Gree G0245D)"
+	depends on GPIOLIB && OF
+	default n
+	help
+	  TI CC2630 Zigbee radio control. Matches DT compatible "TI,cc2630".
+
+config G0245D_TFA98XX
+	bool "NXP TFA98xx smart amplifier (Gree G0245D)"
+	depends on I2C && SND_SOC
+	default n
+	help
+	  NXP TFA98xx amplifier at 0x34 on i2c-6. OnePlus OSS QC8996_N
+	  lineage, adapted to the stock "nxp,tfa98xx" DT compatible.
+	  The baseline SND_SOC_TFA98XX driver uses "tfa,tfa98xx" and is
+	  deliberately left disabled to avoid duplicate global symbols.

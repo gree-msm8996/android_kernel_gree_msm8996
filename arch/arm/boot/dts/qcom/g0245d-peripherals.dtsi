@@ -1,0 +1,239 @@
+/*
+ * Gree G0245D private peripheral device-tree nodes.
+ *
+ * Contract source: work/stock-044.dts (the DTB actually selected by the
+ * G0245D bootloader) and 3.18/kernel-g0245d-cm13/Documentation/g0245d/
+ * peripherals.md.  Numeric phandles were resolved to 4.4 labels; the
+ * pinctrl states are newly declared here because the 4.4 MTP dtsi only
+ * carries ts_active/ts_suspend.
+ *
+ * This file is purely additive: it never overrides a panel or WLAN node.
+ */
+
+&i2c_12 {
+	/* The inherited 4.4 MTP dtsi declares a Synaptics DSX touch at 0x20 on
+	 * this bus, and mi8996_defconfig enables that driver. G0245D only has
+	 * the FT8716 at 0x38; both nodes would otherwise claim GPIO 125 for the
+	 * touch IRQ. Disable it here so the upstream dtsi stays untouched.
+	 */
+	synaptics@20 {
+		status = "disabled";
+	};
+
+	focaltech@38 {
+		compatible = "focaltech,fts";
+		reg = <0x38>;
+		interrupt-parent = <&tlmm>;
+		interrupts = <125 0x2>;
+		vdd-supply = <&pm8994_l22>;
+		vcc_i2c-supply = <&pm8994_l14>;
+		pinctrl-names = "pmx_ts_active", "pmx_ts_suspend";
+		pinctrl-0 = <&ts_active>;
+		pinctrl-1 = <&ts_suspend>;
+		focaltech,name = "fts";
+		focaltech,family-id = <0x54>;
+		focaltech,reset-gpio = <&tlmm 89 0x00>;
+		focaltech,irq-gpio = <&tlmm 125 0x02>;
+		focaltech,display-coords = <0 0 1080 1920>;
+		focaltech,panel-coords = <0 0 1080 1920>;
+		focaltech,button-map = <0x46 0x96 0x38b>;
+		focaltech,no-force-update;
+		focaltech,i2c-pull-up;
+		focaltech,group-id = <0x01>;
+		focaltech,hard-reset-delay-ms = <0x14>;
+		focaltech,soft-reset-delay-ms = <0x96>;
+		focaltech,num-max-touches = <0x0a>;
+		focaltech,fw-name = "FT8716_FW_Reference_V0A_D01_20170227_app.i";
+	};
+};
+
+&i2c_6 {
+	/* The baseline SND_SOC_TFA98XX codec driver (force-selected by
+	 * sound/soc/msm/Kconfig) matches "tfa,tfa98xx".  The stock string is
+	 * kept first so the 3.18 reconstruction could still bind if ever built.
+	 */
+	tfa98xx@34 {
+		compatible = "nxp,tfa98xx", "tfa,tfa98xx";
+		reg = <0x34>;
+		reset-gpio = <&tlmm 40 0x00>;
+	};
+};
+
+&i2c_7 {
+	tusb320@67 {
+		compatible = "my,tusb320";
+		reg = <0x67>;
+		avdd-supply = <&pm8994_l19>;
+		interrupt-parent = <&tlmm>;
+		interrupts = <123 0x2008>;
+		tusb320,irq-gpio = <&tlmm 123 0x2008>;
+		tusb320,select-gpio = <&tlmm 92 0x00>;
+		tusb320,enable-gpio = <&tlmm 47 0x00>;
+	};
+};
+
+&i2c_8 {
+	raon_remote_ctrl@50 {
+		compatible = "raon,remote-ctrl";
+		reg = <0x50>;
+		pinctrl-names = "raon_remote_default", "raon_remote_sleeps";
+		pinctrl-0 = <&g0245d_raon_default>;
+		pinctrl-1 = <&g0245d_raon_sleep>;
+		remote-ctrl,init-gpio = <&tlmm 126 0x00>;
+		remote-ctrl,reset-gpio = <&tlmm 11 0x00>;
+		remote-ctrl,en-gpio = <&tlmm 50 0x00>;
+	};
+};
+
+/* BLSP1 QUP5 SPI controller at 0x7579000 is absent from the 4.4 msm8996
+ * dtsi but present in the G0245D stock DTB. Clocks are the 4.4 bindings:
+ *   clk_gcc_blsp1_ahb_clk           = 0x8caa5b4f
+ *   clk_gcc_blsp1_qup5_spi_apps_clk = 0xbf3e15d7
+ * which are exactly the two clock phandle values in stock-044.dts.
+ */
+&soc {
+	g0245d_spi5: spi@7579000 {
+		compatible = "qcom,spi-qup-v2";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg-names = "spi_physical", "spi_bam_physical";
+		reg = <0x07579000 0x600>, <0x07544000 0x2b000>;
+		interrupt-names = "spi_irq", "spi_bam_irq";
+		interrupts = <0 99 0>, <0 238 0>;
+		spi-max-frequency = <19200000>;
+		qcom,infinite-mode = <0>;
+		qcom,ver-reg-exists;
+		qcom,bam-consumer-pipe-index = <20>;
+		qcom,bam-producer-pipe-index = <21>;
+		qcom,master-id = <86>;
+		clock-names = "iface_clk", "core_clk";
+		clocks = <&clock_gcc clk_gcc_blsp1_ahb_clk>,
+			 <&clock_gcc clk_gcc_blsp1_qup5_spi_apps_clk>;
+		status = "ok";
+
+		goodix_touchfinger@0 {
+			compatible = "goodix,gf";
+			reg = <0x00>;
+			spi-max-frequency = <16000000>;
+			vdd-supply = <&pm8994_l19>;
+			pinctrl-names = "pmx_fp_active", "pmx_fp_suspend";
+			pinctrl-0 = <&g0245d_fp_active>;
+			pinctrl-1 = <&g0245d_fp_suspend>;
+			goodix,spi_irq_gpio = <&tlmm 121 0x2008>;
+			goodix,spi_reset_gpio = <&tlmm 51 0x00>;
+		};
+	};
+
+	zigbee {
+		compatible = "TI,cc2630";
+		cc2630,en-gpio = <&tlmm 63 0x00>;
+		cc2630,reset-gpio = <&tlmm 73 0x00>;
+		pinctrl-names = "zigbee_active", "zigbee_suspend";
+		pinctrl-0 = <&g0245d_zig_rst_active &g0245d_zig_en_active>;
+		pinctrl-1 = <&g0245d_zig_rst_suspend &g0245d_zig_en_suspend>;
+	};
+};
+
+&tlmm {
+	g0245d_raon_pins {
+		g0245d_raon_default: raon_remote_default {
+			mux {
+				pins = "gpio126", "gpio50", "gpio11";
+				function = "gpio";
+			};
+			config {
+				pins = "gpio126", "gpio50", "gpio11";
+				drive-strength = <8>;
+				bias-pull-up;
+			};
+		};
+
+		g0245d_raon_sleep: raon_remote_sleeps {
+			mux {
+				pins = "gpio126", "gpio50", "gpio11";
+				function = "gpio";
+			};
+			config {
+				pins = "gpio126", "gpio50", "gpio11";
+				drive-strength = <2>;
+				bias-pull-down;
+			};
+		};
+	};
+
+	g0245d_fp_pins {
+		g0245d_fp_active: pmx_fp_active {
+			mux {
+				pins = "gpio121", "gpio51";
+				function = "gpio";
+			};
+			config {
+				pins = "gpio121", "gpio51";
+				drive-strength = <8>;
+				bias-pull-up;
+			};
+		};
+
+		g0245d_fp_suspend: pmx_fp_suspend {
+			mux {
+				pins = "gpio121", "gpio51";
+				function = "gpio";
+			};
+			config {
+				pins = "gpio121", "gpio51";
+				drive-strength = <2>;
+				bias-pull-down;
+			};
+		};
+	};
+
+	g0245d_zigbee_pins {
+		g0245d_zig_rst_active: zigbee_rst_active {
+			mux {
+				pins = "gpio73";
+				function = "gpio";
+			};
+			config {
+				pins = "gpio73";
+				drive-strength = <2>;
+				bias-pull-up;
+			};
+		};
+
+		g0245d_zig_rst_suspend: zigbee_rst_suspend {
+			mux {
+				pins = "gpio73";
+				function = "gpio";
+			};
+			config {
+				pins = "gpio73";
+				drive-strength = <2>;
+				bias-pull-down;
+			};
+		};
+
+		g0245d_zig_en_active: zigbee_en_active {
+			mux {
+				pins = "gpio63";
+				function = "gpio";
+			};
+			config {
+				pins = "gpio63";
+				drive-strength = <2>;
+				bias-pull-up;
+			};
+		};
+
+		g0245d_zig_en_suspend: zigbee_en_suspend {
+			mux {
+				pins = "gpio63";
+				function = "gpio";
+			};
+			config {
+				pins = "gpio63";
+				drive-strength = <2>;
+				bias-pull-down;
+			};
+		};
+	};
+};
