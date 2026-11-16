@@ -2643,12 +2643,21 @@ static int tfa98xx_mute(struct snd_soc_dai *dai, int mute, int stream)
 		tfa_dev_stop(tfa98xx->tfa);
 		tfa98xx->dsp_init = TFA98XX_DSP_INIT_STOPPED;
 		mutex_unlock(&tfa98xx->dsp_lock);
+
+		/* Both streams idle: power the output stage down. */
+		if (gpio_is_valid(tfa98xx->power_gpio))
+			gpio_set_value_cansleep(tfa98xx->power_gpio, 0);
 	}
 	else {
 		if (stream == SNDRV_PCM_STREAM_PLAYBACK)
 			tfa98xx->pstream = 1;
 		else
 			tfa98xx->cstream = 1;
+
+		/* Power the output stage before the DSP starts (G0245D:
+		 * amp enable is hph_en0 / gpio13). */
+		if (gpio_is_valid(tfa98xx->power_gpio))
+			gpio_set_value_cansleep(tfa98xx->power_gpio, 1);
 
 		/* Start DSP */
 #if 1
@@ -2657,7 +2666,7 @@ static int tfa98xx_mute(struct snd_soc_dai *dai, int mute, int stream)
 				&tfa98xx->init_work, 0);
 #else
 		tfa98xx_dsp_init(tfa98xx);
-#endif//	
+#endif//
 	}
 
 	return 0;
@@ -2872,6 +2881,13 @@ static int tfa98xx_parse_dt(struct device *dev, struct tfa98xx *tfa98xx,
 	if (tfa98xx->reset_gpio < 0)
 		dev_dbg(dev, "No reset GPIO provided, will not HW reset device\n");
 
+	/* G0245D: the TFA9890 speaker amplifier output stage is gated by an
+	 * external enable line (hph_en0, gpio13 on this board).  Without it
+	 * the I2S data reaches the chip but nothing is audible. */
+	tfa98xx->power_gpio = of_get_named_gpio(np, "qcom,amp-enable-gpio", 0);
+	if (tfa98xx->power_gpio < 0)
+		dev_dbg(dev, "No amp enable GPIO provided.\n");
+
 	tfa98xx->irq_gpio = of_get_named_gpio(np, "irq-gpio", 0);
 	if (tfa98xx->irq_gpio < 0)
 		dev_dbg(dev, "No IRQ GPIO provided.\n");
@@ -3049,12 +3065,20 @@ static int tfa98xx_i2c_probe(struct i2c_client *i2c,
 	}
 	else {
 		tfa98xx->reset_gpio = -1;
+		tfa98xx->power_gpio = -1;
 		tfa98xx->irq_gpio = -1;
 	}
 
 	if (gpio_is_valid(tfa98xx->reset_gpio)) {
 		ret = devm_gpio_request_one(&i2c->dev, tfa98xx->reset_gpio,
 			GPIOF_OUT_INIT_LOW, "TFA98XX_RST");
+		if (ret)
+			return ret;
+	}
+
+	if (gpio_is_valid(tfa98xx->power_gpio)) {
+		ret = devm_gpio_request_one(&i2c->dev, tfa98xx->power_gpio,
+			GPIOF_OUT_INIT_LOW, "TFA98XX_AMP_EN");
 		if (ret)
 			return ret;
 	}

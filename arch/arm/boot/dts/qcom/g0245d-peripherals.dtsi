@@ -56,6 +56,10 @@
 		compatible = "nxp,tfa98xx", "tfa,tfa98xx";
 		reg = <0x34>;
 		reset-gpio = <&tlmm 40 0x00>;
+		/* Speaker PA output-stage enable (hph_en0).  Verified on
+		 * device: without this line the I2S stream reaches the
+		 * TFA9890 but nothing is audible. */
+		qcom,amp-enable-gpio = <&tlmm 13 0x00>;
 	};
 };
 
@@ -247,6 +251,12 @@
 &soc {
 	sound-9335 {
 		qcom,wsa-max-devs = <0>;
+		/* Stock G0245D DTB (msm-id 0xf6/0x30001, board 0x08/0x00,
+		 * pmic 0x20009/0x10013) carries hphl-swh=1; the inherited
+		 * msm8996.dtsi default (0) leaves MBHC falsely reporting a
+		 * headset insert at boot, which sends every playback route
+		 * to the (not wired) headset instead of the speaker. */
+		qcom,msm-mbhc-hphl-swh = <1>;
 		/* CM13 (3.18) G0245D has no TDM BE dai_links: msm8996-mtp.dtsi
 		 * there does not set qcom,tdm-audio-intf.  The 4.4 CAF dtsi
 		 * sets it, pulling in msm8996_tdm_be_dai_links whose 32 TDM
