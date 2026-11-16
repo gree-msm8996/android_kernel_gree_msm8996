@@ -15,6 +15,9 @@
 #include "msm8996-mtp.dtsi"
 #include "dsi-panel-ft8716-1080p-video.dtsi"
 #include "g0245d-peripherals.dtsi"
+/* Stock camera power/GPIO topology. Must come after msm8996-mtp.dtsi
+ * (which pulls the MTP camera nodes) so the overrides win the merge. */
+#include "g0245d-camera-sensor.dtsi"
 
 / {
 	model = "Gree G0245D MSM8996 v3 + PMI8996 (FT8716 FHD)";
