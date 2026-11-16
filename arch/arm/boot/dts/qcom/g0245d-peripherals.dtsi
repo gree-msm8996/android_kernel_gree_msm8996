@@ -439,3 +439,41 @@
 				"msm-dai-q6-mi2s.0", "msm-dai-q6-mi2s.3";
 	};
 };
+
+/* Physical keys: stock DTB (d44) wires PM8994 GPIO 5 as the front Home
+ * switch (linux,code 102) and GPIO 4 as the extra Gree key (59). The
+ * msm8996-mtp.dtsi baseline keeps the MTP camera codes (766/528) which map
+ * to dead CAMERA/FOCUS keycodes on Android, so override with stock values.
+ * The baseline node lives under &soc (msm8996-mtp.dtsi:642); override there
+ * so the merge lands on /soc/gpio_keys, not a stray root-level node.
+ * Node names are kept identical to the baseline for property-level merge. */
+&soc {
+	gpio_keys {
+		vol_up {
+			label = "volume_up";
+			gpios = <&pm8994_gpios 2 0x1>;
+			linux,input-type = <1>;
+			linux,code = <115>;
+			gpio-key,wakeup;
+			debounce-interval = <30>;
+		};
+
+		cam_snapshot {
+			label = "key_gree";
+			gpios = <&pm8994_gpios 4 0x1>;
+			linux,input-type = <1>;
+			linux,code = <59>;
+			gpio-key,wakeup;
+			debounce-interval = <30>;
+		};
+
+		cam_focus {
+			label = "key_home";
+			gpios = <&pm8994_gpios 5 0x1>;
+			linux,input-type = <1>;
+			linux,code = <102>;
+			gpio-key,wakeup;
+			debounce-interval = <30>;
+		};
+	};
+};
