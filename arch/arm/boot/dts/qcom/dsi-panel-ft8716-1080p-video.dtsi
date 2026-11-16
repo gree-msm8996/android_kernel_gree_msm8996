@@ -32,6 +32,13 @@
 		qcom,mdss-dsi-v-bottom-border = <0x00>;
 		qcom,mdss-dsi-bpp = <0x18>;
 		qcom,mdss-dsi-color-order = "rgb_swap_rgb";
+		/* The FT8716 panel is physically mounted upside down (stock carries
+		 * persist.panel.inversemounted=180 and the A11 userspace fix is
+		 * ro.surface_flinger.primary_display_orientation=ORIENTATION_180).
+		 * Flip at scanout in MDSS instead: the MDP base pipe gets
+		 * FLIP_LR|FLIP_UD, so SF/touch/input coordinates stay untouched and
+		 * there is no composition-time cost. */
+		qcom,mdss-dsi-panel-orientation = "180";
 		qcom,mdss-dsi-underflow-color = <0xff>;
 		qcom,mdss-dsi-border-color = <0x00>;
 		qcom,mdss-dsi-tx-eot-append;
