@@ -1902,13 +1902,21 @@ static int fastrpc_init_process(struct fastrpc_file *fl,
 		}
 		inbuf.pageslen = 1;
 
-		VERIFY(err, !init->mem);
-		if (err) {
-			err = -EINVAL;
-			pr_err("adsprpc: %s: %s: ERROR: donated memory allocated in userspace\n",
-				current->comm, __func__);
-			goto bail;
-		}
+		if (init->mem) {
+			/* Legacy libadsprpc (Gree stock BSP era) donates its
+			 * own PD init memory instead of asking the kernel to
+			 * allocate imem. Map the user buffer and hand its
+			 * physical pages to the DSP, mirroring the old
+			 * INIT_CREATE behaviour. Without this the camera
+			 * daemon (mm-qcamera-daemon) aborts on imglib timer
+			 * watchdog after every failed fastrpc_init_process. */
+			mutex_lock(&fl->map_mutex);
+			VERIFY(err, !fastrpc_mmap_create(fl, init->memfd, 0,
+				init->mem, init->memlen, mflags, &mem));
+			mutex_unlock(&fl->map_mutex);
+			if (err)
+				goto bail;
+		} else {
 		memlen = ALIGN(max(1024*1024*3, (int)init->filelen * 4),
 						1024*1024);
 
@@ -1920,6 +1928,7 @@ static int fastrpc_init_process(struct fastrpc_file *fl,
 		if (err)
 			goto bail;
 		fl->init_mem = imem;
+		}
 
 		inbuf.pageslen = 1;
 		ra[0].buf.pv = (void *)&inbuf;
@@ -1934,8 +1943,13 @@ static int fastrpc_init_process(struct fastrpc_file *fl,
 		ra[2].buf.len = inbuf.filelen;
 		fds[2] = init->filefd;
 
-		pages[0].addr = imem->phys;
-		pages[0].size = imem->size;
+		if (mem) {
+			pages[0].addr = mem->phys;
+			pages[0].size = mem->size;
+		} else {
+			pages[0].addr = imem->phys;
+			pages[0].size = imem->size;
+		}
 		ra[3].buf.pv = (void *)pages;
 		ra[3].buf.len = 1 * sizeof(*pages);
 		fds[3] = 0;

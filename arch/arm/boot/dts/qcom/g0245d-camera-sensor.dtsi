@@ -113,7 +113,11 @@
 		/delete-property/ cam_vdig-supply;
 		/delete-property/ cam_vio-supply;
 		/delete-property/ qcom,gpio-reset;
-		/delete-property/ qcom,clock-rates;
+		/* Keep clock-rates: the merged node still carries clock-names
+		 * ("cam_src_clk","cam_clk") and msm_camera_get_clk_info
+		 * rejects a name/rates count mismatch with -EINVAL, which
+		 * kills the whole qcom,camera probe. */
+		qcom,clock-rates = <19200000 0>;
 		cam_vana-supply = <&pm8994_l17>;
 		qcom,cam-vreg-name = "cam_vana";
 		qcom,cam-vreg-min-voltage = <2850000>;
@@ -146,7 +150,7 @@
 		/delete-property/ cam_vio-supply;
 		/delete-property/ cam_vaf-supply;
 		/delete-property/ qcom,gpio-reset;
-		/delete-property/ qcom,clock-rates;
+		qcom,clock-rates = <19200000 0>;
 		cam_vana-supply = <&pm8994_l17>;
 		qcom,cam-vreg-name = "cam_vana";
 		qcom,cam-vreg-min-voltage = <2850000>;
@@ -179,7 +183,7 @@
 		/delete-property/ qcom,actuator-src;
 		/delete-property/ cam_vdig-supply;
 		/delete-property/ qcom,gpio-reset;
-		/delete-property/ qcom,clock-rates;
+		qcom,clock-rates = <19200000 0>;
 		qcom,mount-angle = <270>;
 		qcom,eeprom-src = <&eeprom2>;
 		cam_vio-supply = <&pm8994_lvs1>;
@@ -241,5 +245,6 @@
 		clocks = <&clock_mmss clk_mclk2_clk_src>,
 			<&clock_mmss clk_camss_mclk2_clk>;
 		clock-names = "cam_src_clk", "cam_clk";
+		qcom,clock-rates = <19200000 0>;
 	};
 };

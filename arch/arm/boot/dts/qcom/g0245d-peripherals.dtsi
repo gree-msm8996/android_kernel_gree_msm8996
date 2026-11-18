@@ -56,10 +56,14 @@
 		compatible = "nxp,tfa98xx", "tfa,tfa98xx";
 		reg = <0x34>;
 		reset-gpio = <&tlmm 40 0x00>;
-		/* Speaker PA output-stage enable (hph_en0).  Verified on
-		 * device: without this line the I2S stream reaches the
-		 * TFA9890 but nothing is audible. */
-		qcom,amp-enable-gpio = <&tlmm 13 0x00>;
+		/* gpio13 must stay free: it is CAMIF_MCLK0 for the rear
+		 * IMX258 (stock camera@0 gpios[0] = tlmm 13). A previous
+		 * audio test wired it as a speaker amp-enable here, which
+		 * made msm_camera_request_gpio_table fail on MCLK0 and the
+		 * rear sensor never powered up. Stock defines no amp-enable
+		 * at all; speaker gating goes through qcom,spkr-sd-n-gpio
+		 * (pm8994 GPIOs) instead. Re-verify speaker audio after
+		 * removing this. */
 	};
 };
 

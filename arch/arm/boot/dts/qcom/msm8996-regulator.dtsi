@@ -261,9 +261,14 @@
 	rpm-regulator-ldoa17 {
 		status = "okay";
 		pm8994_l17: regulator-l17 {
-			regulator-min-microvolt = <2500000>;
-			regulator-max-microvolt = <2500000>;
-			qcom,init-voltage = <2500000>;
+			/* Stock G0245D DTB: min 2800000 / max 3200000 /
+			 * init 2850000. The rear IMX258 sensor lib requests
+			 * cam_vana 2850000-3200000; a 2500000-only constraint
+			 * made msm_camera_config_single_vreg fail and the
+			 * whole rear-sensor probe NACK on CCI. */
+			regulator-min-microvolt = <2800000>;
+			regulator-max-microvolt = <3200000>;
+			qcom,init-voltage = <2850000>;
 			status = "okay";
 		};
 	};

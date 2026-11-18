@@ -123,6 +123,40 @@ static long msm_sensor_init_subdev_ioctl(struct v4l2_subdev *sd,
 }
 
 #ifdef CONFIG_COMPAT
+/*
+ * G0245D stock blobs (Gree BSP, 2018) use a smaller sensor_init_cfg_data:
+ * SUB_MODULE_MAX == 12, so struct sensor_init_cfg_data is 188 bytes and
+ * VIDIOC_MSM_SENSOR_INIT_CFG is encoded as 0xC0BC56CA.  The upstream
+ * struct (SUB_MODULE_MAX == 14) yields 0xC0CC56CA (32-bit) / 0xC0D056CA
+ * (64-bit), so stock mm-qcamera-daemon probes landed in the switch
+ * default case and returned a zeroed probed_info (session_id == 0),
+ * making every sensor_probe report failure.  Accept the legacy encoding
+ * explicitly and translate it to the current layout.
+ */
+struct msm_sensor_info_t_legacy12 {
+	char     sensor_name[MAX_SENSOR_NAME];
+	uint32_t session_id;
+	int32_t  subdev_id[12];
+	int32_t  subdev_intf[12];
+	uint8_t  is_mount_angle_valid;
+	uint32_t sensor_mount_angle;
+	int      modes_supported;
+	enum camb_position_t position;
+};
+
+struct sensor_init_cfg_data_legacy12 {
+	enum msm_sensor_init_cfg_type_t cfgtype;
+	struct msm_sensor_info_t_legacy12 probed_info;
+	char                            entity_name[MAX_SENSOR_NAME];
+	union {
+		compat_uptr_t setting;
+	} cfg;
+};
+
+#define VIDIOC_MSM_SENSOR_INIT_CFG32_LEGACY12 \
+	_IOWR('V', BASE_VIDIOC_PRIVATE + 10, \
+	      struct sensor_init_cfg_data_legacy12)
+
 static long msm_sensor_init_subdev_do_ioctl(
 	struct file *file, unsigned int cmd, void *arg)
 {
@@ -149,6 +183,47 @@ static long msm_sensor_init_subdev_do_ioctl(
 		strlcpy(u32->entity_name, sensor_init_data.entity_name,
 			sizeof(sensor_init_data.entity_name));
 		return 0;
+	case VIDIOC_MSM_SENSOR_INIT_CFG32_LEGACY12: {
+		struct sensor_init_cfg_data_legacy12 *u32l =
+			(struct sensor_init_cfg_data_legacy12 *)arg;
+		int i;
+		memset(&sensor_init_data, 0, sizeof(sensor_init_data));
+		sensor_init_data.cfgtype = u32l->cfgtype;
+		sensor_init_data.cfg.setting = compat_ptr(u32l->cfg.setting);
+		cmd = VIDIOC_MSM_SENSOR_INIT_CFG;
+		rc = msm_sensor_init_subdev_ioctl(sd, cmd, &sensor_init_data);
+		if (rc < 0) {
+			pr_err("%s:%d legacy VIDIOC_MSM_SENSOR_INIT_CFG failed (non-fatal)",
+				__func__, __LINE__);
+			return rc;
+		}
+		/* Translate current 14-entry info into the legacy 12-entry
+		 * layout.  Only sensor_name/session_id/entity_name are
+		 * consumed by the stock daemon's sensor_probe, but fill the
+		 * whole legacy struct for completeness. */
+		memcpy(u32l->probed_info.sensor_name,
+			sensor_init_data.probed_info.sensor_name,
+			MAX_SENSOR_NAME);
+		u32l->probed_info.session_id =
+			sensor_init_data.probed_info.session_id;
+		for (i = 0; i < 12; i++) {
+			u32l->probed_info.subdev_id[i] =
+				sensor_init_data.probed_info.subdev_id[i];
+			u32l->probed_info.subdev_intf[i] =
+				sensor_init_data.probed_info.subdev_intf[i];
+		}
+		u32l->probed_info.is_mount_angle_valid =
+			sensor_init_data.probed_info.is_mount_angle_valid;
+		u32l->probed_info.sensor_mount_angle =
+			sensor_init_data.probed_info.sensor_mount_angle;
+		u32l->probed_info.modes_supported =
+			sensor_init_data.probed_info.modes_supported;
+		u32l->probed_info.position =
+			sensor_init_data.probed_info.position;
+		strlcpy(u32l->entity_name, sensor_init_data.entity_name,
+			sizeof(sensor_init_data.entity_name));
+		return 0;
+	}
 	default:
 		return msm_sensor_init_subdev_ioctl(sd, cmd, arg);
 	}
