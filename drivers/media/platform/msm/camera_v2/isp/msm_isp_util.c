@@ -21,6 +21,7 @@
 #include "msm_camera_io_util.h"
 #include "cam_smmu_api.h"
 #include "msm_isp48.h"
+#include "msm_isp_compat_legacy44.h"
 #define CREATE_TRACE_POINTS
 #include "trace/events/msm_cam.h"
 
@@ -901,6 +902,23 @@ static long msm_isp_ioctl_unlocked(struct v4l2_subdev *sd,
 		MSM_ISP_DUAL_VFE_MUTEX_UNLOCK(vfe_dev);
 		mutex_unlock(&vfe_dev->core_mutex);
 		break;
+	case VIDIOC_MSM_ISP_CFG_STREAM_LEGACY44: {
+		/* CM13 stock daemon: 44-byte payload, see
+		 * msm_isp_compat_legacy44.h.  Fields through
+		 * sync_frame_id_src are identical; the current dummy tail
+		 * is never read, so zero-fill it here. */
+		struct msm_vfe_axi_stream_cfg_cmd stream_cfg_cmd;
+
+		memset(&stream_cfg_cmd, 0, sizeof(stream_cfg_cmd));
+		memcpy(&stream_cfg_cmd, arg,
+		       sizeof(struct msm_vfe_axi_stream_cfg_cmd_legacy44));
+		mutex_lock(&vfe_dev->core_mutex);
+		MSM_ISP_DUAL_VFE_MUTEX_LOCK(vfe_dev);
+		rc = msm_isp_cfg_axi_stream(vfe_dev, &stream_cfg_cmd);
+		MSM_ISP_DUAL_VFE_MUTEX_UNLOCK(vfe_dev);
+		mutex_unlock(&vfe_dev->core_mutex);
+		break;
+	}
 	case VIDIOC_MSM_ISP_AXI_HALT:
 		mutex_lock(&vfe_dev->core_mutex);
 		MSM_ISP_DUAL_VFE_MUTEX_LOCK(vfe_dev);

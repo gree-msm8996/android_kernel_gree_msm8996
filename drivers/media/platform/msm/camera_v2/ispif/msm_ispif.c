@@ -29,6 +29,7 @@
 #include "msm_camera_io_util.h"
 #include "cam_hw_ops.h"
 #include "cam_soc_api.h"
+#include "msm_ispif_compat_legacy368.h"
 
 #ifdef CONFIG_MSM_ISPIF_V1
 #include "msm_ispif_hwreg_v1.h"
@@ -1911,6 +1912,15 @@ static long msm_ispif_subdev_ioctl_unlocked(struct v4l2_subdev *sd,
 	switch (cmd) {
 	case VIDIOC_MSM_ISPIF_CFG:
 		return msm_ispif_cmd(sd, arg);
+	case VIDIOC_MSM_ISPIF_CFG_LEGACY368: {
+		/* CM13 stock daemon: 368-byte payload, see
+		 * msm_ispif_compat_legacy368.h. */
+		struct ispif_cfg_data cfg;
+
+		memset(&cfg, 0, sizeof(cfg));
+		memcpy(&cfg, arg, sizeof(struct ispif_cfg_data_legacy368));
+		return msm_ispif_cmd(sd, &cfg);
+	}
 	case VIDIOC_MSM_ISPIF_CFG_EXT:
 		return msm_ispif_cmd_ext(sd, arg);
 	case MSM_SD_NOTIFY_FREEZE: {
