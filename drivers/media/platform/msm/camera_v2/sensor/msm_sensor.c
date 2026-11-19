@@ -15,6 +15,7 @@
 #include "msm_cci.h"
 #include "msm_camera_io_util.h"
 #include "msm_camera_i2c_mux.h"
+#include "msm_cam_compat_legacy12.h"
 #include <linux/regulator/rpm-smd-regulator.h>
 #include <linux/regulator/consumer.h>
 #include <linux/drv2604.h>
@@ -366,12 +367,126 @@ static long msm_sensor_subdev_ioctl(struct v4l2_subdev *sd,
 }
 
 #ifdef CONFIG_COMPAT
+/*
+ * G0245D: CM13 legacy (SUB_MODULE_MAX=12) VIDIOC_MSM_SENSOR_CFG support.
+ *
+ * The stock mm-qcamera-daemon computes the ioctl number from a
+ * 152-byte struct sensorb_cfg_data, this kernel from a 168-byte
+ * struct sensorb_cfg_data32, so the daemon's 0xc09856c1 does not match
+ * VIDIOC_MSM_SENSOR_CFG32 (0xc0a856c1) and the kernel would answer
+ * -ENOIOCTLCMD.  See msm_cam_compat_legacy12.h for the full story.
+ *
+ * Note that video_usercopy() has already copied the 152 user bytes into
+ * a kernel buffer and passes that buffer to us; it also copies the
+ * result back to user space when we return.  So "argp" here is plain
+ * kernel memory, not a user pointer.
+ *
+ * Every cfgtype the stock daemon actually uses (CFG_SET_SLAVE_INFO,
+ * CFG_SLAVE_READ_I2C, CFG_WRITE_I2C_ARRAY, CFG_SET_STOP_STREAM_SETTING)
+ * only reads "cfg.setting", a compat_uptr_t stored at offset 4 of the
+ * union - the very same offset in both the legacy and the current
+ * layout.  The trailing sensor_info arrays differ in length, so
+ * CFG_GET_SENSOR_INFO and CFG_GET_SENSOR_INIT_PARAMS are served from a
+ * dedicated kernel-side copy and translated back into the legacy layout
+ * afterwards.
+ */
+static long msm_sensor_cfg32_legacy12(struct msm_sensor_ctrl_t *s_ctrl,
+	void *argp)
+{
+	struct sensorb_cfg_data_legacy12 *legacy =
+		(struct sensorb_cfg_data_legacy12 *)argp;
+	struct sensorb_cfg_data32 cdata;
+	int rc;
+
+	if (legacy->cfgtype == CFG_GET_SENSOR_INFO) {
+		/*
+		 * Serve the request from a kernel-side current-layout
+		 * struct (msm_sensor_config32() writes the result
+		 * straight through its argument pointer), then hand the
+		 * 12-entry legacy view back to the daemon.
+		 */
+		int i;
+
+		memset(&cdata, 0, sizeof(cdata));
+		cdata.cfgtype = legacy->cfgtype;
+		rc = s_ctrl->func_tbl->sensor_config32(s_ctrl,
+			(void __user *)&cdata);
+		if (rc < 0)
+			return rc;
+
+		memset(legacy, 0, sizeof(*legacy));
+		legacy->cfgtype = cdata.cfgtype;
+		memcpy(legacy->cfg.sensor_info.sensor_name,
+			cdata.cfg.sensor_info.sensor_name,
+			MAX_SENSOR_NAME);
+		legacy->cfg.sensor_info.session_id =
+			cdata.cfg.sensor_info.session_id;
+		for (i = 0; i < MSM_CAM_SUB_MODULE_MAX_LEGACY12; i++) {
+			legacy->cfg.sensor_info.subdev_id[i] =
+				cdata.cfg.sensor_info.subdev_id[i];
+			legacy->cfg.sensor_info.subdev_intf[i] =
+				cdata.cfg.sensor_info.subdev_intf[i];
+		}
+		legacy->cfg.sensor_info.is_mount_angle_valid =
+			cdata.cfg.sensor_info.is_mount_angle_valid;
+		legacy->cfg.sensor_info.sensor_mount_angle =
+			cdata.cfg.sensor_info.sensor_mount_angle;
+		legacy->cfg.sensor_info.modes_supported =
+			cdata.cfg.sensor_info.modes_supported;
+		legacy->cfg.sensor_info.position =
+			cdata.cfg.sensor_info.position;
+		return 0;
+	}
+
+	if (legacy->cfgtype == CFG_GET_SENSOR_INIT_PARAMS) {
+		/*
+		 * Same as above: the regular code path stores the result
+		 * in the caller supplied struct.  struct
+		 * msm_sensor_init_params has the same layout in both
+		 * worlds, so only the union member has to be copied out.
+		 */
+		memset(&cdata, 0, sizeof(cdata));
+		cdata.cfgtype = legacy->cfgtype;
+		rc = s_ctrl->func_tbl->sensor_config32(s_ctrl,
+			(void __user *)&cdata);
+		if (rc < 0)
+			return rc;
+
+		memset(legacy, 0, sizeof(*legacy));
+		legacy->cfgtype = cdata.cfgtype;
+		legacy->cfg.sensor_init_params = cdata.cfg.sensor_init_params;
+		return 0;
+	}
+
+	/*
+	 * All remaining cfgtypes only consume cfg.setting, which lives
+	 * at the same offset in both layouts.  Run the regular code path
+	 * against a kernel-side copy of the current layout.
+	 */
+	memset(&cdata, 0, sizeof(cdata));
+	cdata.cfgtype = legacy->cfgtype;
+	cdata.cfg.setting = legacy->cfg.setting;
+	cdata.cfg.sensor_i2c_sync_params = legacy->cfg.sensor_i2c_sync_params;
+
+	return s_ctrl->func_tbl->sensor_config32(s_ctrl,
+		(void __user *)&cdata);
+}
 static long msm_sensor_subdev_do_ioctl(
 	struct file *file, unsigned int cmd, void *arg)
 {
 	struct video_device *vdev = video_devdata(file);
 	struct v4l2_subdev *sd = vdev_to_v4l2_subdev(vdev);
 	switch (cmd) {
+	case VIDIOC_MSM_SENSOR_CFG32_LEGACY12: {
+		struct msm_sensor_ctrl_t *s_ctrl = get_sctrl(sd);
+
+		if (!s_ctrl) {
+			pr_err("%s s_ctrl NULL\n", __func__);
+			return -EBADF;
+		}
+		return msm_sensor_cfg32_legacy12(s_ctrl,
+			(void __user *)arg);
+	}
 	case VIDIOC_MSM_SENSOR_CFG32:
 		cmd = VIDIOC_MSM_SENSOR_CFG;
 	default:
@@ -848,8 +963,14 @@ static int msm_sensor_config32(struct msm_sensor_ctrl_t *s_ctrl,
 		reg_setting = compat_ptr(stop_setting32.reg_setting);
 
 		if (!stop_setting->size) {
-			pr_err("%s:%d failed\n", __func__, __LINE__);
-			rc = -EFAULT;
+			/* G0245D: the stock CM13 sensor stack sends an empty stop
+			 * setting during sensor_init().  The Gree BSP kernel accepted
+			 * it as "no registers to apply"; rejecting it here makes
+			 * SENSOR_INIT fail and leaves every later sensor event
+			 * waiting forever for completion. */
+			CDBG("%s:%d empty stop setting accepted\n",
+				__func__, __LINE__);
+			rc = 0;
 			break;
 		}
 		stop_setting->reg_setting = kzalloc(stop_setting->size *
@@ -1335,8 +1456,14 @@ int msm_sensor_config(struct msm_sensor_ctrl_t *s_ctrl, void __user *argp)
 		reg_setting = stop_setting->reg_setting;
 
 		if (!stop_setting->size) {
-			pr_err("%s:%d failed\n", __func__, __LINE__);
-			rc = -EFAULT;
+			/* G0245D: the stock CM13 sensor stack sends an empty stop
+			 * setting during sensor_init().  The Gree BSP kernel accepted
+			 * it as "no registers to apply"; rejecting it here makes
+			 * SENSOR_INIT fail and leaves every later sensor event
+			 * waiting forever for completion. */
+			CDBG("%s:%d empty stop setting accepted\n",
+				__func__, __LINE__);
+			rc = 0;
 			break;
 		}
 		stop_setting->reg_setting = kzalloc(stop_setting->size *
