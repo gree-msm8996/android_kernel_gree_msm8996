@@ -129,6 +129,7 @@ struct gf_dev {
 	bool			device_available;
 	struct notifier_block	notifier;
 	bool			fb_black;
+	u8			nav_key;
 	int			irq;
 };
 
@@ -514,13 +515,30 @@ static const struct file_operations gf_fops = {
 /* Interrupt + framebuffer notifier                                    */
 /* ------------------------------------------------------------------ */
 
+static void gf_report_key(struct gf_dev *gdev, int code, int value)
+{
+	if (!gdev->input)
+		return;
+
+	input_event(gdev->input, EV_KEY, code, value);
+	input_event(gdev->input, EV_SYN, SYN_REPORT, 0);
+}
+
 /*
- * gf_irq() in the vendor driver reads 0x8140 (status), optionally 0x8043
- * (mode), reports navigation keys through an input device, clears 0x8140,
- * and signals userspace.  We keep the notification path and the key codes
- * (KEY_HOME 0x66 / KEY_MENU 0x8b / KEY_BACK 0x9e seen in the disassembly)
- * but leave the vendor's fingerprint algorithm to gx_fpd, which fetches
- * the raw frame through read().
+ * gf_irq() follows the vendor driver: read 0x8140 (status), optionally
+ * 0x8043 (mode), report the two capacitive side keys, clear 0x8140 for
+ * key events, and signal userspace for image/calibration frames.
+ *
+ * Stock key decoding (from the unstripped vmlinux):
+ *   mode 1: status bit5 -> KEY_HOME, bit4 = press; bit3 -> KEY_BACK,
+ *           bit2 = press; bit1 -> KEY_MENU, bit0 = press.
+ *   mode 0: side keys still arrive while the screen is off; bit3 -> BACK,
+ *           bit2 = press; bit1 -> MENU, bit0 = press.  The release after
+ *           either key is reported by the next status with neither bit set.
+ *
+ * Image/calibration frames (0xc0) must NOT be cleared here: gx_fpd's SIGIO
+ * handler re-reads 0x8140, gates its ~13 KB read on bit7, and clears the
+ * status itself after the packet has been fetched.
  */
 static irqreturn_t gf_irq(int irq, void *handle)
 {
@@ -534,10 +552,39 @@ static irqreturn_t gf_irq(int irq, void *handle)
 	    (status & 0x80))
 		gf_spi_read_byte(gdev, GF_REG_MODE, &mode);
 
-	gdev->mode = mode;
-	/* Vendor clears the interrupt status register after handling. */
-	gf_spi_write_byte(gdev, GF_REG_IRQ_STATUS, 0);
+	if (status & 0x80) {
+		if (mode == 0x01 && (status & 0x2a)) {
+			if (status & 0x20) {
+				gf_report_key(gdev, KEY_HOME, (status >> 4) & 1);
+				gf_spi_write_byte(gdev, GF_REG_IRQ_STATUS, 0);
+			} else if (status & 0x08) {
+				gf_report_key(gdev, KEY_BACK, (status >> 2) & 1);
+				gf_spi_write_byte(gdev, GF_REG_IRQ_STATUS, 0);
+			} else if (status & 0x02) {
+				gf_report_key(gdev, KEY_MENU, status & 1);
+				gf_spi_write_byte(gdev, GF_REG_IRQ_STATUS, 0);
+			}
+		} else if (mode == 0x00) {
+			if ((status & 0x08) && gdev->fb_black) {
+				gf_report_key(gdev, KEY_BACK,
+					      (status >> 2) & 1);
+				gdev->nav_key = 1;
+				gf_spi_write_byte(gdev, GF_REG_IRQ_STATUS, 0);
+			} else if ((status & 0x02) && gdev->fb_black) {
+				gf_report_key(gdev, KEY_MENU, status & 1);
+				gdev->nav_key = 2;
+				gf_spi_write_byte(gdev, GF_REG_IRQ_STATUS, 0);
+			} else if (gdev->nav_key) {
+				gf_report_key(gdev, KEY_BACK, 0);
+				gf_report_key(gdev, KEY_MENU, 0);
+				gf_spi_write_byte(gdev, GF_REG_IRQ_STATUS,
+						  status & 0xf0);
+				gdev->nav_key = 0;
+			}
+		}
+	}
 
+	gdev->mode = mode;
 	gdev->buf_status = (s8)(0x80 | status);
 	kill_fasync(&gdev->async, SIGIO, POLL_IN);
 	wake_up_interruptible(&gf_waitq);

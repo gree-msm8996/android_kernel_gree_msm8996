@@ -24,6 +24,11 @@
 
 #define SPI_FIFO_WORD_CNT             0x0048
 
+/* msm_spi_slv_setup() (slave-mode path, unused on G0245D) still references
+ * these QUP registers; define them so the QSD build compiles. */
+#define QUP_CONFIG                    0x0000
+#define QUP_CONFIG_SPI_SLAVE          0x0400
+
 #else
 
 #define QSD_REG(x)
@@ -477,7 +482,9 @@ static inline void msm_spi_set_write_count(struct msm_spi *dd, int val) {}
 
 static inline void msm_spi_complete(struct msm_spi *dd)
 {
-	complete(&dd->transfer_complete);
+	/* snapshot drift fix: struct member was renamed to a tx/rx pair;
+	 * this helper has no callers, keep it compilable in QSD mode */
+	complete(&dd->rx_transfer_complete);
 }
 
 static inline void msm_spi_enable_error_flags(struct msm_spi *dd)

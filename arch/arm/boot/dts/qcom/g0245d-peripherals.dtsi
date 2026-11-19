@@ -114,6 +114,10 @@
 		qcom,bam-consumer-pipe-index = <20>;
 		qcom,bam-producer-pipe-index = <21>;
 		qcom,master-id = <86>;
+		qcom,use-pinctrl;
+		pinctrl-names = "spi_default", "spi_sleep";
+		pinctrl-0 = <&g0245d_spi5_active>;
+		pinctrl-1 = <&g0245d_spi5_sleep>;
 		clock-names = "iface_clk", "core_clk";
 		clocks = <&clock_gcc clk_gcc_blsp1_ahb_clk>,
 			 <&clock_gcc clk_gcc_blsp1_qup5_spi_apps_clk>;
@@ -143,6 +147,35 @@
 };
 
 &tlmm {
+	g0245d_spi5_pins {
+		/* BLSP1 QUP5 SPI: mosi/miso/cs/clk = gpio81..gpio84 (pinctrl-msm8996.c
+		 * blsp_spi5_groups). Without muxing the QUP Tx times out ("SPI Tx
+		 * transaction timeout" on the first chip-id read). */
+		g0245d_spi5_active: spi5_active {
+			mux {
+				pins = "gpio81", "gpio82", "gpio83", "gpio84";
+				function = "blsp_spi5";
+			};
+			config {
+				pins = "gpio81", "gpio82", "gpio83", "gpio84";
+				drive-strength = <6>;
+				bias-disable;
+			};
+		};
+
+		g0245d_spi5_sleep: spi5_sleep {
+			mux {
+				pins = "gpio81", "gpio82", "gpio83", "gpio84";
+				function = "blsp_spi5";
+			};
+			config {
+				pins = "gpio81", "gpio82", "gpio83", "gpio84";
+				drive-strength = <2>;
+				bias-disable;
+			};
+		};
+	};
+
 	g0245d_raon_pins {
 		g0245d_raon_default: raon_remote_default {
 			mux {
