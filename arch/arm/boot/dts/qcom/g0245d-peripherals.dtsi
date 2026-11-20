@@ -514,3 +514,43 @@
 		};
 	};
 };
+
+/* G0245D capacitive touch-key backlight (Back / Recents).
+ *
+ * Stock DTB (work/stock-dtb/stock-44-off1617434.dts, under
+ * qcom,pm8994@0) drives these two keys from PM8994 MPP4 through a
+ * dedicated qcom,leds-qpnp node called "qcom,mpp@a300" (reg 0xa300)
+ * whose child declares linux,name = "button-backlight".  The inherited
+ * msm8996-mtp.dtsi only exposes the same physical MPP4 as an
+ * HDMI_5v_vreg GPIO (mpp@a300 under pm8994_mpps).  Stock intentionally
+ * keeps BOTH nodes -- qpnp-pin and qcom,leds-qpnp share the regmap --
+ * so add the LED node alongside it instead of disabling the GPIO node.
+ *
+ * Stock also sets linux,default-trigger = "hr-trigger", but this 4.4
+ * kernel has no hr-trigger driver.  Leave the trigger unset; the
+ * "manual" mode lets the AOSP lights HAL drive brightness directly
+ * via /sys/class/leds/button-backlight/brightness (init.g0245d.rc and
+ * ueventd.qcom.rc already declare that node's permissions).
+ */
+&spmi_bus {
+	qcom,pm8994@0 {
+		qcom,mpp@a300 {
+			compatible = "qcom,leds-qpnp";
+			reg = <0xa300 0x100>;
+			label = "mpp";
+			status = "okay";
+
+			qcom,led_mpp_4 {
+				label = "mpp";
+				linux,name = "button-backlight";
+				qcom,default-state = "off";
+				qcom,current-setting = <0x14>;
+				qcom,max-current = <0x28>;
+				qcom,id = <0x06>;
+				qcom,source-sel = <0x01>;
+				qcom,mode-ctrl = <0x60>;
+				qcom,mode = "manual";
+			};
+		};
+	};
+};
