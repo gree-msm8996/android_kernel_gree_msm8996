@@ -1070,6 +1070,9 @@ static long msm_isp_ioctl_unlocked(struct v4l2_subdev *sd,
 				    cmd);
 		rc = -EINVAL;
 	}
+	/* G0245D WIP debug: identify failing ISP ioctl (preview garble). */
+	if (rc)
+		pr_err("ISPDBG: cmd=0x%08x rc=%ld\n", cmd, rc);
 	return rc;
 }
 
