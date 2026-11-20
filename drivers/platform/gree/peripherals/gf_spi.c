@@ -55,12 +55,48 @@
 								/* 0xc0106701 */
 #define GF_IOC_SPEED		_IOW(GF_IOC_MAGIC, 2, u32)		/* 0x40046702 */
 
+/*
+ * Remainder of the ABI used by the stock gx_fpd / libfphal.so.  Recovered by
+ * disassembling libfphal.so (aarch64): every call site loads w1 with 0x67NN
+ * optionally ORed (movk) with a high half-word:
+ *   power_on  0x00006704 / power_off 0x00006703
+ *   enable_irq 0x00006706 / disable_irq 0x00006705
+ *   send_key  0x40086707 (struct gf_ioc_key, 8 bytes)
+ *   read_nav_base 0x40186708 / get_nav_buf 0x40186709
+ *                     (struct gf_ioc_nav, 24 bytes)
+ * The earlier DWARF-based reconstruction only implemented 0/1/2, so every
+ * one of these hit the "unsupported ioctl" default and silently returned 0
+ * without performing the requested action (irq masking in particular).
+ */
+#define GF_IOC_POWER_OFF	_IO(GF_IOC_MAGIC, 3)			/* 0x00006703 */
+#define GF_IOC_POWER_ON		_IO(GF_IOC_MAGIC, 4)			/* 0x00006704 */
+#define GF_IOC_DISABLE_IRQ	_IO(GF_IOC_MAGIC, 5)			/* 0x00006705 */
+#define GF_IOC_ENABLE_IRQ	_IO(GF_IOC_MAGIC, 6)			/* 0x00006706 */
+#define GF_IOC_SEND_KEY		_IOW(GF_IOC_MAGIC, 7, struct gf_ioc_key)	/* 0x40086707 */
+#define GF_IOC_READ_NAV_BASE	_IOW(GF_IOC_MAGIC, 8, struct gf_ioc_nav)	/* 0x40186708 */
+#define GF_IOC_GET_NAV_BUF	_IOW(GF_IOC_MAGIC, 9, struct gf_ioc_nav)	/* 0x40186709 */
+
 struct gf_ioc_transfer {
 	u8	cmd;		/* 0xF0 = write, 0xF1 = read */
 	u8	reserve;
 	u16	addr;
 	u32	len;
 	u8	*buf;
+};
+
+/* libfphal gf_send_key_kernel(w0=key, w1=down): 2 x u32, 8 bytes. */
+struct gf_ioc_key {
+	u32	key;
+	u32	value;
+};
+
+/* libfphal gf_read_nav_base/gf_get_nav_buf: 24-byte ioctl arg.
+ * gf_read_nav_base passes only buf (offset 0); gf_get_nav_buf passes buf
+ * (offset 0) and a second pointer at offset 16. */
+struct gf_ioc_nav {
+	u8 __user	*buf;
+	u64		reserved;
+	u64		len;
 };
 
 #define GF_CHRDEV_MAJOR		154
@@ -312,10 +348,14 @@ static int gf_open(struct inode *inode, struct file *filp)
 	}
 	mutex_unlock(&gdev->buf_lock);
 
+	/* IRQ wake is owned solely by probe()/remove().  Do not toggle it here:
+	 * gf_open/gf_release, GF_IOC_RESET and the fb notifier used to each
+	 * flip wake independently; their interleaving drove wake_depth negative
+	 * ("Unbalanced IRQ 128 wake disable") whenever userspace blanked fb0.
+	 * Keep the open-count for bookkeeping only. */
 	gdev->users++;
 	filp->private_data = gdev;
 	gdev->device_available = true;
-	irq_set_irq_wake(gdev->irq, 1);
 
 	pr_debug("goodix_fp: open, spi->irq = %d\n", gdev->spi->irq);
 	return nonseekable_open(inode, filp);
@@ -331,7 +371,6 @@ static int gf_release(struct inode *inode, struct file *filp)
 	if (gdev->users > 0)
 		gdev->users--;
 	gdev->device_available = false;
-	irq_set_irq_wake(gdev->irq, 0);
 	return 0;
 }
 
@@ -387,10 +426,17 @@ static ssize_t gf_write(struct file *filp, const char __user *ubuf,
 	return ret;
 }
 
+/* Defined below, used by the power/key ioctl handlers. */
+static void gf_report_key(struct gf_dev *gdev, int code, int value);
+static int gf_power_on(struct gf_dev *gdev);
+static void gf_power_off(struct gf_dev *gdev);
+
 static long gf_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
 	struct gf_dev *gdev = filp->private_data;
 	struct gf_ioc_transfer tr;
+	struct gf_ioc_key key;
+	struct gf_ioc_nav nav;
 	u32 speed;
 	u8 mode;
 	u8 __user *ubuf;
@@ -404,9 +450,7 @@ static long gf_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 
 	switch (cmd) {
 	case GF_IOC_RESET:
-		irq_set_irq_wake(gdev->irq, 0);
 		gf_hw_reset(gdev);
-		irq_set_irq_wake(gdev->irq, 1);
 		pr_debug("goodix_fp: hw reset done\n");
 		return 0;
 
@@ -457,6 +501,54 @@ static long gf_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 			return -EMSGSIZE;
 		gf_spi_setup(gdev, speed);
 		pr_debug("goodix_fp: spi speed set to %u\n", speed);
+		return 0;
+
+	/*
+	 * Stock gx_fpd toggles the regulator and, more importantly, masks the
+	 * IRQ around raw-data captures.  The old default branch acknowledged
+	 * these with 0 but did nothing, so the IRQ kept firing during capture
+	 * and the frame/CRC could be corrupted.  Implement them for real.
+	 */
+	case GF_IOC_POWER_ON:
+		if (!gdev->vdd) {
+			ret = gf_power_on(gdev);
+			if (ret)
+				return ret;
+		}
+		return 0;
+
+	case GF_IOC_POWER_OFF:
+		gf_power_off(gdev);
+		return 0;
+
+	case GF_IOC_DISABLE_IRQ:
+		disable_irq_nosync(gdev->irq);
+		return 0;
+
+	case GF_IOC_ENABLE_IRQ:
+		enable_irq(gdev->irq);
+		return 0;
+
+	case GF_IOC_SEND_KEY:
+		if (copy_from_user(&key, (void __user *)arg, sizeof(key)))
+			return -EFAULT;
+		/* key/value come from gf_send_key_kernel(key, down). */
+		gf_report_key(gdev, key.key, key.value ? 1 : 0);
+		return 0;
+
+	case GF_IOC_READ_NAV_BASE:
+	case GF_IOC_GET_NAV_BUF:
+		if (copy_from_user(&nav, (void __user *)arg, sizeof(nav)))
+			return -EFAULT;
+		/*
+		 * Navigation-key baseline is a per-device calibration value
+		 * produced by the sensor; the reconstructed driver has no
+		 * access to it.  Zero the caller buffer so gx_fpd sees a clean
+		 * baseline rather than uninitialised stack data.  Touch-key
+		 * reporting itself is handled independently in gf_irq().
+		 */
+		if (nav.buf && clear_user(nav.buf, 8))
+			return -EFAULT;
 		return 0;
 
 	default:
@@ -606,12 +698,12 @@ static int gf_fb_notifier(struct notifier_block *nb,
 		return NOTIFY_OK;
 
 	blank = *(int *)event->data;
+	/* Wake ownership stays in probe()/remove(); blank transitions must not
+	 * flip it (see gf_open comment).  Only track state for the driver. */
 	if (blank == FB_BLANK_UNBLANK) {
 		gdev->fb_black = false;
-		irq_set_irq_wake(gdev->irq, 0);
 	} else if (blank == FB_BLANK_POWERDOWN) {
 		gdev->fb_black = true;
-		irq_set_irq_wake(gdev->irq, 1);
 	}
 	return NOTIFY_OK;
 }
@@ -883,6 +975,9 @@ static int gf_probe(struct spi_device *spi)
 			gdev->irq, ret);
 		goto err_fb;
 	}
+	/* Single owner of IRQ wake: enable here, disable in gf_remove().  All
+	 * other wake toggles were removed because their interleaving produced
+	 * "Unbalanced IRQ 128 wake disable". */
 	irq_set_irq_wake(gdev->irq, 1);
 
 	mutex_lock(&gf_device_list_lock);
@@ -919,6 +1014,7 @@ static int gf_remove(struct spi_device *spi)
 	if (!gdev)
 		return 0;
 
+	irq_set_irq_wake(gdev->irq, 0);
 	free_irq(gdev->irq, gdev);
 	fb_unregister_client(&gdev->notifier);
 
