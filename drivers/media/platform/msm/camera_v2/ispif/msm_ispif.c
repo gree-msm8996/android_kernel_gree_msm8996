@@ -1850,6 +1850,9 @@ static long msm_ispif_dispatch_cmd(enum ispif_cfg_type_t cmd,
 		rc = -EINVAL;
 		break;
 	}
+	/* G0245D WIP debug: identify failing ISPIF cfg_type (preview garble). */
+	if (rc)
+		pr_err("ISPIFDBG: cfg_type=%d rc=%ld\n", cmd, rc);
 	return rc;
 }
 
@@ -1898,9 +1901,6 @@ static long msm_ispif_cmd(struct v4l2_subdev *sd, void *arg)
 	}
 	mutex_unlock(&ispif->mutex);
 
-	/* G0245D WIP debug: identify failing ISPIF cfg_type (preview garble). */
-	if (rc)
-		pr_err("ISPIFDBG: cfg_type=%d rc=%ld\n", cmd, rc);
 	return rc;
 }
 
