@@ -31,6 +31,7 @@
 #include <linux/pinctrl/consumer.h>
 #include <linux/delay.h>
 #include <linux/i2c.h>
+#include <linux/ioctl.h>
 #include <linux/pm.h>
 
 #define RC_I2C_ADDR		0x50
@@ -45,15 +46,26 @@
 #define RC_PINCTRL_DEFAULT	"raon_remote_default"
 #define RC_PINCTRL_SLEEP	"raon_remote_sleeps"
 
-/* Vendor ioctl numbers, recovered from remote_ctrl_ioctl(). */
+/* Vendor ioctl numbers.  The GPIO controls are raw values, while the
+ * mode/I2C commands are encoded with _IOW('r', nr, int) exactly as the
+ * stock RemoteIr HAL does.  The previous 0x72xx constants were missing the
+ * direction/size bits, so the app's mode switch silently fell through. */
+#define RC_IOC_MAGIC		'r'
 #define RC_IOC_GPIO_1001	0x1001
 #define RC_IOC_GPIO_1002	0x1002
 #define RC_IOC_GPIO_1003	0x1003
 #define RC_IOC_GPIO_1004	0x1004
-#define RC_IOC_POWER_ON		0x7205
-#define RC_IOC_POWER_OFF	0x7206
-#define RC_IOC_I2C_WRITE	0x7207
-#define RC_IOC_I2C_WRRD		0x7208
+#define RC_IOC_MODE_BOOTLOADER	_IOW(RC_IOC_MAGIC, 0x05, int)
+#define RC_IOC_MODE_USERIR	_IOW(RC_IOC_MAGIC, 0x06, int)
+#define RC_IOC_I2C_WRITE	_IOW(RC_IOC_MAGIC, 0x07, int)
+#define RC_IOC_I2C_WRRD		_IOW(RC_IOC_MAGIC, 0x08, int)
+
+/* Stock RemoteIr HAL passes this through the _IOW() ioctls.  The length
+ * and the buffer pointer are both userspace values, not encoded in arg. */
+struct remote_msg {
+	unsigned short length;
+	unsigned char __user *buf;
+};
 
 struct remote_ctrl_data {
 	struct i2c_client	*client;
@@ -139,6 +151,15 @@ static ssize_t remote_ctrl_write(struct file *file, const char __user *buf,
 		mutex_unlock(&tx_lock);
 		return -EFAULT;
 	}
+
+	/* The Raon controller latches each frame on a low-to-high init
+	 * transition.  Without this pulse the I2C write is sent while the
+	 * chip is still busy with the previous burst and times out. */
+	gpio_direction_output(gDeviceData->init_gpio, 0);
+	msleep(10);
+	gpio_set_value(gDeviceData->init_gpio, 1);
+	msleep(10);
+
 	ret = i2c_master_send(gDeviceData->client, _i2c_buf, count);
 	if (ret >= 0)
 		pr_debug("[remote_ir]:remote_ctrl_write   i2c_master_send=%d  success!\n",
@@ -180,6 +201,7 @@ static long remote_ctrl_ioctl(struct file *file, unsigned int cmd,
 			      unsigned long arg)
 {
 	struct i2c_msg msg[2];
+	struct remote_msg rm;
 	int ret = 0;
 	int val;
 	size_t len;
@@ -187,10 +209,10 @@ static long remote_ctrl_ioctl(struct file *file, unsigned int cmd,
 	if (!gDeviceData)
 		return -ENODEV;
 
-	val = (int)(arg & 0x1);
-	len = (size_t)(arg & 0xffff);
-	if (len == 0 || len > RC_BUF_SIZE)
-		len = RC_BUF_SIZE;
+	/* Only the raw 0x100x GPIO commands pass the value directly.  The
+	 * _IOW() commands pass a userspace pointer; treating its low bits as
+	 * a value/length was wrong even though the transmit path uses write(). */
+	val = (int)arg;
 
 	switch (cmd) {
 	case RC_IOC_GPIO_1001:
@@ -212,53 +234,63 @@ static long remote_ctrl_ioctl(struct file *file, unsigned int cmd,
 		gpio_set_value(gDeviceData->reset_gpio, val);
 		return 0;
 
-	case RC_IOC_POWER_ON:
-		rc_power_sequence(true);
-		return 0;
-
-	case RC_IOC_POWER_OFF:
+	case RC_IOC_MODE_BOOTLOADER:
+		pr_info("[remote_ir]: bootloader mode ioctl\n");
 		rc_power_sequence(false);
 		return 0;
 
-	case RC_IOC_I2C_WRITE:
-		mutex_lock(&tx_lock);
-		memset(_i2c_buf, 0, RC_BUF_SIZE);
-		if (copy_from_user(_i2c_buf, (void __user *)arg, len))
-			ret = -EFAULT;
-		else
-			ret = i2c_master_send(gDeviceData->client,
-					      _i2c_buf, len);
-		mutex_unlock(&tx_lock);
-		return ret;
+	case RC_IOC_MODE_USERIR:
+		pr_info("[remote_ir]: user IR mode ioctl\n");
+		rc_power_sequence(true);
+		return 0;
 
+	case RC_IOC_I2C_WRITE:
 	case RC_IOC_I2C_WRRD:
-		/* Two-message write-then-read transaction on addr 0x50. */
-		mutex_lock(&rx_lock);
-		memset(_i2c_buf, 0, RC_BUF_SIZE);
-		if (copy_from_user(_i2c_buf, (void __user *)arg, len)) {
-			mutex_unlock(&rx_lock);
+		if (copy_from_user(&rm, (void __user *)arg, sizeof(rm)))
 			return -EFAULT;
-		}
-		msg[0].addr = RC_I2C_ADDR;
-		msg[0].flags = 0;
-		msg[0].len = len;
-		msg[0].buf = _i2c_buf;
-		msg[1].addr = RC_I2C_ADDR;
-		msg[1].flags = I2C_M_RD;
-		msg[1].len = len;
-		msg[1].buf = _i2c_buf;
-		ret = i2c_transfer(gDeviceData->client->adapter, msg, 2);
-		if (ret >= 0 && copy_to_user((void __user *)arg,
-					     _i2c_buf, len))
-			ret = -EFAULT;
-		mutex_unlock(&rx_lock);
-		return ret;
+		len = rm.length;
+		if (len == 0 || len > RC_BUF_SIZE)
+			len = RC_BUF_SIZE;
+		break;
 
 	default:
 		/* The vendor driver just returns 0 for unknown commands. */
 		pr_debug("[remote_ctrl] unsupported ioctl 0x%08x\n", cmd);
 		return 0;
 	}
+
+	if (cmd == RC_IOC_I2C_WRITE) {
+		mutex_lock(&tx_lock);
+		memset(_i2c_buf, 0, RC_BUF_SIZE);
+		if (copy_from_user(_i2c_buf, rm.buf, len))
+			ret = -EFAULT;
+		else
+			ret = i2c_master_send(gDeviceData->client,
+					      _i2c_buf, len);
+		mutex_unlock(&tx_lock);
+		return ret;
+	}
+
+	/* Two-message write-then-read transaction on addr 0x50. */
+	mutex_lock(&rx_lock);
+	memset(_i2c_buf, 0, RC_BUF_SIZE);
+	if (copy_from_user(_i2c_buf, rm.buf, len)) {
+		mutex_unlock(&rx_lock);
+		return -EFAULT;
+	}
+	msg[0].addr = RC_I2C_ADDR;
+	msg[0].flags = 0;
+	msg[0].len = len;
+	msg[0].buf = _i2c_buf;
+	msg[1].addr = RC_I2C_ADDR;
+	msg[1].flags = I2C_M_RD;
+	msg[1].len = len;
+	msg[1].buf = _i2c_buf;
+	ret = i2c_transfer(gDeviceData->client->adapter, msg, 2);
+	if (ret >= 0 && copy_to_user(rm.buf, _i2c_buf, len))
+		ret = -EFAULT;
+	mutex_unlock(&rx_lock);
+	return ret;
 }
 
 static int remote_ctrl_open(struct inode *inode, struct file *file)

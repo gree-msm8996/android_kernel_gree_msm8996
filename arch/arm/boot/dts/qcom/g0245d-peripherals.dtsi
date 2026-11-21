@@ -92,6 +92,10 @@
 };
 
 &i2c_8 {
+	/* Raon IR frames exceed the FIFO; 4.4 i2c-msm-v2 DMA reports
+	 * OVER_UNDER_RUN for them.  BLOCK mode is the stock-compatible path. */
+	qcom,disable-dma;
+
 	raon_remote_ctrl@50 {
 		compatible = "raon,remote-ctrl";
 		reg = <0x50>;
