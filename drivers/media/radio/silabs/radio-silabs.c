@@ -291,12 +291,6 @@ static int fm_configure_gpios(struct silabs_fm_device *radio, bool on)
 			FMDERR("Unable to set direction\n");
 			return rc;
 		}
-		/* Some gpiolib backends do not latch the value passed to
-		 * gpio_direction_output(); set it explicitly so the Si4705
-		 * really leaves reset before the first I2C command. */
-		gpio_set_value(fm_reset_gpio, 1);
-		FMDERR("reset gpio %d deasserted, value=%d\n",
-		       fm_reset_gpio, gpio_get_value(fm_reset_gpio));
 		/* Wait for the value to take effect on gpio. */
 		msleep(100);
 
@@ -2757,9 +2751,7 @@ static int silabs_fm_vidioc_querycap(struct file *file, void *priv,
 	strlcpy(capability->driver, DRIVER_NAME, sizeof(capability->driver));
 	strlcpy(capability->card, DRIVER_CARD, sizeof(capability->card));
 	snprintf(capability->bus_info, 4,  "I2C");
-	capability->capabilities = V4L2_CAP_TUNER | V4L2_CAP_RADIO |
-				   V4L2_CAP_DEVICE_CAPS;
-	capability->device_caps = V4L2_CAP_TUNER | V4L2_CAP_RADIO;
+	capability->capabilities = V4L2_CAP_TUNER | V4L2_CAP_RADIO;
 
 	return 0;
 }

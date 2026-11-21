@@ -10,17 +10,6 @@
  * This file is purely additive: it never overrides a panel or WLAN node.
  */
 
-/* The Si4705 sits on BLSP2 QUP1 (i2c@75b5000). Stock G0245D enables the
- * internal pull-ups on this bus in the active state; the inherited 4.4 MTP
- * state disables them, and the FM chip then NACKs every I2C read. Restore
- * the stock bias without touching the common pinctrl dtsi. */
-&i2c_7_active {
-	config {
-		/delete-property/ bias-disable;
-		bias-pull-up;
-	};
-};
-
 &i2c_12 {
 	/* The inherited 4.4 MTP dtsi declares a Synaptics DSX touch at 0x20 on
 	 * this bus, and mi8996_defconfig enables that driver. G0245D only has
@@ -324,16 +313,6 @@
 		 * board's speaker/headset playback, so remove it instead. */
 		/delete-property/ qcom,tdm-audio-intf;
 		/delete-property/ qcom,hdmi-audio-rx;
-	};
-
-	qcom,msm-dai-tdm-tert-rx {
-		/* G0245D wires the Si4705 GPO1/status pin to GPIO78. The
-		 * inherited MTP DAI node claims the same pin as tertiary TDM
-		 * DOUT, so silabs_fm_pinctrl_select("pmx_fm_active") fails.
-		 * CM13 has no TDM BE links on this board and playback uses
-		 * QUAT MI2S, so keep the DAI but release its pinctrl states. */
-		pinctrl-0 = <>;
-		pinctrl-1 = <>;
 	};
 };
 
